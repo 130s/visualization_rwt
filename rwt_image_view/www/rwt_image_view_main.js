@@ -1,13 +1,13 @@
 $(function() {
 
-  ROSLIB.Ros.prototype.getTopicsForType = function(type, callback) {
+  ROSLIB.Ros.prototype.getTopicsForType = function(_type, callback) {
     var topicsForTypeClient = new ROSLIB.Service({
       ros : this,
       name : '/rosapi/topics_for_type',
       serviceType : 'rosapi/TopicsForType'
     });
     var request = new ROSLIB.ServiceRequest({
-      type: type
+      type: _type
     });
     topicsForTypeClient.callService(request, function(result) {
       callback(result.topics);
@@ -38,8 +38,7 @@ $(function() {
     _.map(image_topics, function(topic) {
       $("#topic-select").append('<option value="' + topic + '">' + topic + "</option>");
     });
-  });
-
+   });
   var mjpeg_canvas = null;
   var current_image_topic = null;
   $("#topic-form").submit(function(e) {
@@ -60,6 +59,10 @@ $(function() {
       width: div_width,
       height: 480 * div_width / 640.0
     });
+    $("#canvas-area canvas").css({ "position":"absolute",
+                                   "left": "0px",
+                                   "top": "0px",
+                                   "z-index": "1"});
     return false;
   });
 
@@ -105,10 +108,123 @@ $(function() {
           $("#topic-area").before(html);
           $button.removeClass("btn-danger")
             .addClass("btn-success")
-            .html("record");  
+            .html("record");
         });
       }
     }
   });
-  
-});
+
+  { // overlay pen view
+    var overlay_canvas = null;
+    var overlay_context = null;
+    var touchPathTopic = null;
+    var pencilmodep = false;
+    overlay_canvas = document.createElement('canvas');
+    $("#pencil-button").click(function (){
+      if (pencilmodep){
+        //      if (overlay_canvas) overlay_canvas = null;
+        $("#canvas-area #overlay-canvas").remove();
+        pencilmodep = false;
+      } else {
+        console.log("touch enabled");
+        touchPathTopic = new ROSLIB.Topic({
+          ros: ros,
+//          name: $("#topic-select").val() + '/screenpoint_array_raw',
+          name: '/screenpoint_array_raw',
+          messageType: 'rwt_image_view/ScreenPointsStamped'
+        });
+        console.log("messageType = " + touchPathTopic.messageType);
+        overlay_canvas.width = mjpeg_canvas.width; // clear context
+        overlay_canvas.height = mjpeg_canvas.height;
+        overlay_canvas.setAttribute("id", "overlay-canvas");
+        $("#canvas-area").append(overlay_canvas);
+        $("#canvas-area #overlay-canvas").css({ "z-index": "10",
+                                                "position": "absolute",
+                                                "left": "0px",
+                                                "top": "0px"});
+        //      $("#canvas-area #overlay-canvas").append(overlay_canvas);
+        overlay_context = overlay_canvas.getContext('2d');
+        pencilmodep = true;
+      }
+    });
+  }  // end of overlay pen view
+
+  { // touch/mouse event handlers
+    var clickp = false;
+    var touchPoints = [];
+    overlay_canvas.addEventListener("mousedown", function (e){
+      clickp = true;
+      overlay_context.lineWidth = 3;
+      overlay_context.strokeStyle = 'rgb(255,0,0)' // red
+      overlay_context.beginPath();
+      overlay_context.moveTo(e.offsetX, e.offsetY);
+      touchPoints.push({
+        x: e.offsetX,
+        y: e.offsetY,
+        z: 0
+      });
+    });
+    overlay_canvas.addEventListener("mousemove", function (e){
+      if(clickp){
+        overlay_context.lineTo(e.offsetX, e.offsetY);
+        overlay_context.stroke();
+        touchPoints.push({
+          x: e.offsetX,
+          y: e.offsetY,
+          z: 0
+        });
+      }
+    });
+    overlay_canvas.addEventListener("mouseup", function (e){
+      clickp = false;
+      console.log($("#topic-select").val() + '/screenpoint_array_raw');
+        console.log("messageType = " + touchPathTopic.messageType);
+      touchPathTopic.publish(new ROSLIB.Message({
+        width: mjpeg_canvas.width,
+        height: mjpeg_canvas.height,        
+        points: touchPoints
+      }));
+      console.log(touchPoints.length + " points published.");
+      touchPoints = [];
+      overlay_canvas.width = mjpeg_canvas.width; // clear context
+    });
+
+    overlay_canvas.addEventListener("touchstart", function (e){
+      var canvasRect = overlay_canvas.getBoundingClientRect();
+      var touchX = e.touches[0].pageX - canvasRect.left;
+      var touchY = e.touches[0].pageY - canvasRect.top;
+      overlay_context.lineWidth = 3;
+      overlay_context.strokeStyle = 'rgb(255,0,0)' // red
+      overlay_context.beginPath();
+      overlay_context.moveTo(touchX, touchY);
+      touchPoints.push({
+        x: touchX,
+        y: touchY,
+        z: 0
+      });
+    });
+    overlay_canvas.addEventListener("touchmove", function (e){
+      var canvasRect = overlay_canvas.getBoundingClientRect();
+      var touchX = e.touches[0].pageX - canvasRect.left;
+      var touchY = e.touches[0].pageY - canvasRect.top;
+      e.preventDefault();
+      overlay_context.lineTo(touchX, touchY);
+      overlay_context.stroke();
+      touchPoints.push({
+        x: touchX,
+        y: touchY,
+        z: 0
+      });
+    });
+    overlay_canvas.addEventListener("touchend", function (e){
+      touchPathTopic.publish(new ROSLIB.Message({
+        width: mjpeg_canvas.width,
+        height: mjpeg_canvas.height,
+        points: touchPoints
+      }));
+      touchPoints = [];
+      overlay_canvas.width = mjpeg_canvas.width; // clear context
+    });
+  } // end of touch/mouse event handlers
+
+}); // end of $
